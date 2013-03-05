@@ -1,4 +1,6 @@
 
+var requests = [];
+
 var makeQueryString = function (obj) {
   var params = [], key, queryString;
   
@@ -58,7 +60,7 @@ var onReadyStateChange = function (requestIndex, obj) {
 }
 
 var makeRequest = function (obj, noAuth) {
-  var url, request, queryString;
+  var url, request, queryString, auth;
 
   // Make sure we have a method and a parameters object
   obj.method     = obj.method || "GET";
@@ -70,13 +72,13 @@ var makeRequest = function (obj, noAuth) {
     obj.parameters.accountType = "GOOGLE";
     obj.parameters.service     = "reader";
     obj.parameters.output      = "json"; 
-    obj.parameters.client      = "greader.js";
+    obj.parameters.client      = greader.CLIENT;
   }
 
   // If we have a token, add it to the parameters.
   // It seems that "GET" requests don't care about your token
-  if (readerToken && obj.method === "POST") {
-    obj.parameters.T = readerToken;     
+  if (userToken && obj.method === "POST") {
+    obj.parameters.T = userToken;     
   }
   
   // Turn our parameters object into a query string
@@ -90,8 +92,9 @@ var makeRequest = function (obj, noAuth) {
   request.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
   request.setRequestHeader('Cookie', '');
 
-  if (readerAuth.get() && !noAuth) {
-    request.setRequestHeader("Authorization", "GoogleLogin auth=" + readerAuth.get());
+  auth = greader.user.getAuth();
+  if (auth && !noAuth) {
+    request.setRequestHeader("Authorization", "GoogleLogin auth=" + auth);
   }
 
   request.onreadystatechange = _.bind(onReadyStateChange, request, requests.length, obj);;

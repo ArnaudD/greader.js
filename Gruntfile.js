@@ -20,7 +20,8 @@ module.exports = function(grunt) {
         src: [
           'src/globals.js',
           'src/env.js',
-          'src/localstorage.js',
+          'src/memory-store.js',
+          'src/persistance.js',
           'src/networking.js',
           'src/user.js',
           'src/feeds.js',

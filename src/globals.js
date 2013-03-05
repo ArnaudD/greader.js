@@ -14,17 +14,14 @@ var LOGIN_URL             = "https://www.google.com/accounts/ClientLogin",
     UNREAD_SUFFIX         = "unread-count",
     RENAME_LABEL_SUFFIX   = "rename-tag",
     EDIT_TAG_SUFFIX       = "edit-tag",
-
-    readerFeeds = [],
-    readerAuth  = new localStorageWrapper("Auth"),
-    readerUser  = new localStorageWrapper("User"),
-    readerToken = "",
-    requests    = [],
+    onready,
     greader;
 
+var userToken = ""; // FIXME
 
 greader = {
   CLIENT: 'greader.js',
+
   TAGS: {
     "like": "user/-/state/com.google/like",
     "label": "user/-/label/",
@@ -35,5 +32,25 @@ greader = {
     "kept-unread": "user/-/state/com.google/kept-unread",
     "reading-list": "user/-/state/com.google/reading-list"
   },
-  has_loaded_prefs: false
+
+  init: function (callback) {
+    this._readyCallback = callback;
+
+    if (this._ready) {
+      this._init();
+    }
+  },
+
+  _onStoreReady: function () {
+    console.log('i');
+    this._ready = true;
+    this._init();
+  },
+
+  _init: function () {
+    if (this._readyCallback) {
+      this._readyCallback.call(this);
+    }
+  }
+
 };

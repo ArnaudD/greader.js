@@ -4,7 +4,7 @@ greader.js
 
 Unofficial Google Reader Javascript API.
 
-Fork of https://github.com/Tibfib/Google-Reader-Library or Node.js and the browser (WebApp with CORS disabled)
+Fork of https://github.com/Tibfib/Google-Reader-Library or Node.js and the browser (WebApps with cross domain XHR enabled)
 
 **WIP**
 
