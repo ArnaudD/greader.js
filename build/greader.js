@@ -15,17 +15,14 @@ var LOGIN_URL             = "https://www.google.com/accounts/ClientLogin",
     UNREAD_SUFFIX         = "unread-count",
     RENAME_LABEL_SUFFIX   = "rename-tag",
     EDIT_TAG_SUFFIX       = "edit-tag",
-
-    readerFeeds = [],
-    readerAuth  = new localStorageWrapper("Auth"),
-    readerUser  = new localStorageWrapper("User"),
-    readerToken = "",
-    requests    = [],
+    onready,
     greader;
 
+var userToken = ""; // FIXME
 
 greader = {
   CLIENT: 'greader.js',
+
   TAGS: {
     "like": "user/-/state/com.google/like",
     "label": "user/-/label/",
@@ -36,7 +33,27 @@ greader = {
     "kept-unread": "user/-/state/com.google/kept-unread",
     "reading-list": "user/-/state/com.google/reading-list"
   },
-  has_loaded_prefs: false
+
+  init: function (callback) {
+    this._readyCallback = callback;
+
+    if (this._ready) {
+      this._init();
+    }
+  },
+
+  _onStoreReady: function () {
+    console.log('i');
+    this._ready = true;
+    this._init();
+  },
+
+  _init: function () {
+    if (this._readyCallback) {
+      this._readyCallback.call(this);
+    }
+  }
+
 };
 
 
@@ -45,60 +62,333 @@ if (typeof exports !== 'undefined') {
     exports = module.exports = greader;
   }
   exports.greader = greader;
-} else {
+
+  if (!_) {
+    var _ = require('underscore');
+    _.string = require('underscore.string')
+  };
+
+  if (!XMLHttpRequest) {
+    var XMLHttpRequest = require('xhr2');
+  }
+
+  if (!async) {
+    var async = require('async');
+  }
+
+}
+else {
   this.greader = greader; // this == window
 }
 
-if (!_ && require) {
-  var _ = require('underscore');
-  _.string = require('underscore.string');
-}
-
-if (!XMLHttpRequest) {
-  var XMLHttpRequest = require('xhr2');
-}
-
-if (!async && require) {
-  var async = require('async');
-}
-
 _.mixin(_.string.exports());
-_.string.include('Underscore.string', 'string'); // => true
+_.string.include('Underscore.string', 'string');
 
 
-if (!localStorage) {
-  var localStorage = {}; // Fake persistance for node
-}
+/**
+ * MemoryStore provides the same API as IDBStore to be easily swappable depending on the environment
+ */
 
-function localStorageWrapper (key) {
-  this.key = key;
-};
+greader.MemoryStore = (function () {
 
-localStorageWrapper.prototype.get = function () {
-  if (!localStorage[this.key]) {
-    return;
+  var defaults = {
+    storeName: 'Store',
+    storePrefix: 'IDBWrapper-',
+    dbVersion: 1,
+    keyPath: 'id',
+    autoIncrement: true,
+    onStoreReady: function () {
+    },
+    onError: function(error){
+      throw error;
+    },
+    indexes: []
+  };
+
+  var MemoryStore = function (options, onStoreReady) {
+
+    for(var key in defaults){
+      this[key] = typeof options[key] != 'undefined' ? options[key] : defaults[key];
+    }
+
+    this.store = {};
+
+    if (onStoreReady) {
+      onStoreReady();
+    } else {
+      this.onStoreReady();
+    }
+
+    this._insertIdCount = 0;
+
+  };
+
+  MemoryStore.prototype = {
+
+    deleteDatabase: function () {
+      delete this.store;
+    },
+
+    put: function (dataObj, onSuccess, onError) {
+      onSuccess || (onSuccess = noop);
+      if (typeof dataObj[this.keyPath] == 'undefined') {
+        dataObj[this.keyPath] = this._getUID();
+      }
+      this.store[this.keyPath] = dataObj;
+      onSuccess(dataObj);
+    },
+
+    get: function (key, onSuccess, onError) {
+      onSuccess || (onSuccess = noop);
+      onSuccess(this.store[key]);
+    },
+
+    remove: function (key, onSuccess, onError) {
+      onSuccess || (onSuccess = noop);
+      delete this.store[key];
+      onSuccess();
+    },
+
+    batch: function (dataArray, onSuccess, onError) {
+      if(Object.prototype.toString.call(dataArray) != '[object Array]'){
+        onError(new Error('dataArray argument must be of type Array.'));
+      }
+
+      onSuccess || (onSuccess = noop);
+
+      var count  = dataArray.length;
+      var called = false;
+      var onItemSuccess = function (event) {
+        count--;
+        if (count === 0 && !called) {
+          called = true;
+          onSuccess();
+        }
+      }
+
+      _.each(dataArray, function (operation) {
+        var type  = operation.type;
+        var key   = operation.key;
+        var value = operation.value;
+
+        if (type === "remove") {
+          this.remove(key, onItemSuccess);
+        } else if (type === "put") {
+          this.put(value, onItemSuccess);
+        }
+      }, this);
+    },
+
+    getAll: function (onSuccess, onError) {
+      onSuccess(_.values(this.store));
+    },
+
+    clear: function (onSuccess, onError) {
+      onSuccess || (onSuccess = noop);
+      this.store = {};
+      onSuccess();
+    },
+
+    _getUID: function () {
+      return this._insertIdCount++ + Date.now();
+    },
+
+    getIndexList: function () {
+      return this.store.indexNames;
+    }/*,
+
+
+    hasIndex: function (indexName) {
+      return this.store.indexNames.contains(indexName);
+    },
+
+    normalizeIndexData: function (indexData) {
+      indexData.keyPath = indexData.keyPath || indexData.name;
+      indexData.unique = !!indexData.unique;
+      indexData.multiEntry = !!indexData.multiEntry;
+    },
+
+    indexComplies: function (actual, expected) {
+      var complies = ['keyPath', 'unique', 'multiEntry'].every(function (key) {
+        // IE10 returns undefined for no multiEntry
+        if (key == 'multiEntry' && actual[key] === undefined && expected[key] === false) {
+          return true;
+        }
+        return expected[key] == actual[key];
+      });
+      return complies;
+    },
+
+    iterate: function (onItem, options) {
+      options = mixin({
+        index: null,
+        order: 'ASC',
+        filterDuplicates: false,
+        keyRange: null,
+        writeAccess: false,
+        onEnd: null,
+        onError: function (error) {
+          console.error('Could not open cursor.', error);
+        }
+      }, options || {});
+
+      var directionType = options.order.toLowerCase() == 'desc' ? 'PREV' : 'NEXT';
+      if (options.filterDuplicates) {
+        directionType += '_NO_DUPLICATE';
+      }
+
+      var cursorTransaction = this.db.transaction([this.storeName], this.consts[options.writeAccess ? 'READ_WRITE' : 'READ_ONLY']);
+      var cursorTarget = cursorTransaction.objectStore(this.storeName);
+      if (options.index) {
+        cursorTarget = cursorTarget.index(options.index);
+      }
+
+      var cursorRequest = cursorTarget.openCursor(options.keyRange, this.consts[directionType]);
+      cursorRequest.onerror = options.onError;
+      cursorRequest.onsuccess = function (event) {
+        var cursor = event.target.result;
+        if (cursor) {
+          onItem(cursor.value, cursor, cursorTransaction);
+          cursor['continue']();
+        } else {
+          if(options.onEnd){
+            options.onEnd();
+          } else {
+            onItem(null);
+          }
+        }
+      };
+    },
+
+    query: function (onSuccess, options) {
+      var result = [];
+      options = options || {};
+      options.onEnd = function () {
+        onSuccess(result);
+      };
+      this.iterate(function (item) {
+        result.push(item);
+      }, options);
+    },
+
+    count: function (onSuccess, options) {
+      options = mixin({
+        index: null,
+        keyRange: null
+      }, options || {});
+
+      var onError = options.onError || function (error) {
+        console.error('Could not open cursor.', error);
+      };
+
+      var cursorTransaction = this.db.transaction([this.storeName], this.consts.READ_ONLY);
+      var cursorTarget = cursorTransaction.objectStore(this.storeName);
+      if (options.index) {
+        cursorTarget = cursorTarget.index(options.index);
+      }
+
+      var countRequest = cursorTarget.count(options.keyRange);
+      countRequest.onsuccess = function (evt) {
+        onSuccess(evt.target.result);
+      };
+      countRequest.onError = function (error) {
+        onError(error);
+      };
+    },
+
+    makeKeyRange: function(options){
+      var keyRange,
+          hasLower = typeof options.lower != 'undefined',
+          hasUpper = typeof options.upper != 'undefined';
+
+      switch(true){
+        case hasLower && hasUpper:
+          keyRange = this.keyRange.bound(options.lower, options.upper, options.excludeLower, options.excludeUpper);
+          break;
+        case hasLower:
+          keyRange = this.keyRange.lowerBound(options.lower, options.excludeLower);
+          break;
+        case hasUpper:
+          keyRange = this.keyRange.upperBound(options.upper, options.excludeUpper);
+          break;
+        default:
+          throw new Error('Cannot create KeyRange. Provide one or both of "lower" or "upper" value.');
+      }
+
+      return keyRange;
+
+    }
+*/
+  };
+
+  /** helpers **/
+
+  var noop = function () {
+  };
+  var empty = {};
+  var mixin = function (target, source) {
+    var name, s;
+    for (name in source) {
+      s = source[name];
+      if (s !== empty[name] && s !== target[name]) {
+        target[name] = s;
+      }
+    }
+    return target;
+  };
+
+  return MemoryStore;
+
+})(this);
+
+(function (root) {
+
+  var GReaderStore, initializedStores = 0, onStoreReady;
+
+  if (root.indexedDB || root.webkitIndexedDB || root.mozIndexedDB) {
+    GReaderStore = IDBStore;
+  }
+  else {
+    GReaderStore = greader.MemoryStore;
   }
 
-  try {
-    return JSON.parse(localStorage[this.key]);
-  } catch(e) {
-    return localStorage[this.key];
-  }
+  // TODO mongo store
 
-};
+  onStoreReady = function () {
+    initializedStores++;
+    if (initializedStores === 3) {
+      greader._onStoreReady();
+    }
+  };
 
-localStorageWrapper.prototype.set = function (value) {
-  try {
-    localStorage[this.key] = (typeof value === "string") ? value : JSON.stringify(value);
-  } catch (e){
-    console.error("Error Saving to localStorage");
-  }
-};
+  greader.stores = {
 
-localStorageWrapper.prototype.del = function () {
-  delete localStorage[this.key];
-};
+    user:  new GReaderStore({
+      dbVersion: 1,
+      storeName: 'user',
+      keyPath: 'name',
+      autoIncrement: false,
+      onStoreReady: onStoreReady
+    }),
 
+    feeds: new GReaderStore({
+      dbVersion: 1,
+      storeName: 'feeds',
+      onStoreReady: onStoreReady
+    }),
+
+    items: new GReaderStore({
+      dbVersion: 1,
+      storeName: 'items',
+      onStoreReady: onStoreReady
+    })
+
+  };
+
+})(this);
+
+
+var requests = [];
 
 var makeQueryString = function (obj) {
   var params = [], key, queryString;
@@ -159,7 +449,7 @@ var onReadyStateChange = function (requestIndex, obj) {
 }
 
 var makeRequest = function (obj, noAuth) {
-  var url, request, queryString;
+  var url, request, queryString, auth;
 
   // Make sure we have a method and a parameters object
   obj.method     = obj.method || "GET";
@@ -171,13 +461,13 @@ var makeRequest = function (obj, noAuth) {
     obj.parameters.accountType = "GOOGLE";
     obj.parameters.service     = "reader";
     obj.parameters.output      = "json"; 
-    obj.parameters.client      = "greader.js";
+    obj.parameters.client      = greader.CLIENT;
   }
 
   // If we have a token, add it to the parameters.
   // It seems that "GET" requests don't care about your token
-  if (readerToken && obj.method === "POST") {
-    obj.parameters.T = readerToken;     
+  if (userToken && obj.method === "POST") {
+    obj.parameters.T = userToken;     
   }
   
   // Turn our parameters object into a query string
@@ -191,8 +481,9 @@ var makeRequest = function (obj, noAuth) {
   request.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
   request.setRequestHeader('Cookie', '');
 
-  if (readerAuth.get() && !noAuth) {
-    request.setRequestHeader("Authorization", "GoogleLogin auth=" + readerAuth.get());
+  auth = greader.user.getAuth();
+  if (auth && !noAuth) {
+    request.setRequestHeader("Authorization", "GoogleLogin auth=" + auth);
   }
 
   request.onreadystatechange = _.bind(onReadyStateChange, request, requests.length, obj);;
@@ -201,111 +492,121 @@ var makeRequest = function (obj, noAuth) {
 }; // makeRequest()
 
 
-var User;
+greader.user = (function () {
 
-User = {
+  var userStore  = greader.stores.user,
+      feedsStore = greader.stores.feeds,
+      auth       = null,
+      User;
 
-  isAuth: function () {
-    if(readerAuth.get()){
-      return true;
-    }
-  },
+  User = {
 
-  login: function (email, password, successCallback, failCallback) {
-    if (email.length === 0 || password.length === 0) {
-      failCallback("Blank Info...");
-      return;
-    }
-    makeRequest({
-      method: "GET",
-      url: LOGIN_URL,
-      parameters: {Email: email, Passwd: password},
-      onSuccess: function (transport) {
-        readerAuth.set(_.lines(transport.responseText)[2].replace("Auth=", ""));
-        User.load(successCallback, failCallback);
-      },
-      onFailure: function (transport) {
-        console.error(transport);
-        failCallback(greader.normalizeError(transport.responseText));
+    isAuth: function () {
+      return auth !== null;
+    },
+
+    getAuth: function () {
+      return auth;
+    },
+
+    login: function (email, password, successCallback, failCallback) {
+      if (email.length === 0 || password.length === 0) {
+        failCallback("Blank Info...");
+        return;
       }
-    });
-  },
 
-  logout: function () {
-    readerAuth.del();
-    readerUser.del();
-    greader.setFeeds([]);
-  },
-
-  getToken: function (successCallback, failCallback) {
-    makeRequest({
-      method: "GET",
-      url: BASE_URL + TOKEN_SUFFIX,
-      parameters: {},
-      onSuccess: function (transport) {
-        readerToken = transport.responseText;
-        successCallback();
-
-      },
-      onFailure: function (transport) {
-        console.error("failed", transport);
-        if (failCallback) {
+      makeRequest({
+        method: "GET",
+        url: LOGIN_URL,
+        parameters: {Email: email, Passwd: password},
+        onSuccess: function (transport) {
+          auth = _.lines(transport.responseText)[2].replace("Auth=", "");
+          userStore.put({name: 'auth', value: auth}, function () {
+            User.load(successCallback, failCallback);
+          });
+        },
+        onFailure: function (transport) {
+          console.error(transport);
           failCallback(greader.normalizeError(transport.responseText));
         }
-      }
-    });
-  },
+      });
+    },
 
-  load: function (successCallback, failCallback) {
-    makeRequest({
-      method: "GET",
-      url: BASE_URL + USERINFO_SUFFIX,
-      parameters: {},
-      onSuccess: function (transport) {
-        var user = JSON.parse(transport.responseText)
-        readerUser.set(user);
-        successCallback(user);
-      },
-      onFailure: function (transport) {
-        console.error(transport);
-        if (failCallback) {
-          failCallback(greader.normalizeError(transport.responseText));
+    logout: function () {
+      userStore.clear();
+      feedsStore.clear();
+    },
 
-        }
-      }
-    });
-  },
-
-  loadPreferences: function (successCallback, failCallback) {
-    makeRequest({
-      method: "GET",
-      url: BASE_URL + PREFERENCES_PATH,
-      parameters: {},
-      onSuccess: function (transport) {
-        User.preferencesLoaded = true;
-        User.preferences = JSON.parse(transport.responseText).streamprefs;
-        if (successCallback) {
+    getToken: function (successCallback, failCallback) {
+      makeRequest({
+        method: "GET",
+        url: BASE_URL + TOKEN_SUFFIX,
+        parameters: {},
+        onSuccess: function (transport) {
+          console.log(transport);
+          userToken = transport.responseText;
           successCallback();
+        },
+        onFailure: function (transport) {
+          console.error("failed", transport);
+          if (failCallback) {
+            failCallback(greader.normalizeError(transport.responseText));
+          }
         }
-      },
-      onFailure: function (transport) {
-        console.error(transport);
-        if (failCallback) {
-          failCallback(greader.normalizeError(transport.responseText));
+      });
+    },
 
+    load: function (successCallback, failCallback) {
+      makeRequest({
+        method: "GET",
+        url: BASE_URL + USERINFO_SUFFIX,
+        parameters: {},
+        onSuccess: function (transport) {
+          var user = JSON.parse(transport.responseText)
+          userStore.put({name: 'info', value: user}, function () {
+            successCallback(user);
+          });
+        },
+        onFailure: function (transport) {
+          console.error(transport);
+          if (failCallback) {
+            failCallback(greader.normalizeError(transport.responseText));
+          }
         }
-      }
-    });
-  },
+      });
+    },
 
-  get: function () {
-    return readerUser.get();
-  }
+    loadPreferences: function (successCallback, failCallback) {
+      makeRequest({
+        method: "GET",
+        url: BASE_URL + PREFERENCES_PATH,
+        parameters: {},
+        onSuccess: function (transport) {
+          User.preferencesLoaded = true;
+          User.preferences = JSON.parse(transport.responseText).streamprefs;
+          userStore.put({name: 'preferences', value: this.preferences});
+          if (successCallback) {
+            successCallback();
+          }
+        },
+        onFailure: function (transport) {
+          console.error(transport);
+          if (failCallback) {
+            failCallback(greader.normalizeError(transport.responseText));
 
-};
+          }
+        }
+      });
+    },
 
-greader.user = User;
+    get: function (successCallback, errorCallback) {
+      userStore.get('info', successCallback, errorCallback);
+    }
+  };
 
+  return User;
+
+})();
 
 
 var Feeds, Labels;
